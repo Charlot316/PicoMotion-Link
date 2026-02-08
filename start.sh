@@ -1,6 +1,19 @@
 #!/bin/bash
 
-PROJECT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# 获取项目根目录
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+echo "🚀 正在启动 PICO Controller 适配环境..."
+echo "📂 项目目录: $PROJECT_DIR"
+
+# --- [新增加的防休眠逻辑] ---
+echo "⚙️  正在配置 PICO 防休眠模式 (Stay Awake)..."
+adb shell settings put system screen_off_timeout 2147483647 > /dev/null 2>&1
+adb shell settings put global stay_on_while_plugged_in 3 > /dev/null 2>&1
+adb shell svc power stayon true > /dev/null 2>&1
+echo "✅ PICO 已设置为永不休眠模式。"
+# ---------------------------
+
+# 确保在项目根目录下运行，以便 index.html 能被正确找到
 cd "$PROJECT_DIR"
 
 echo "=== 正在清理旧进程... ==="
