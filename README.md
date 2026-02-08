@@ -70,4 +70,4 @@ It leverages the power of **WebXR** and **ADB Port Forwarding** to bypass networ
 - `monitor.py`: Optional ADB-based raw event listener.
 
 ## 📄 License
-MIT
+Apache-2.0
