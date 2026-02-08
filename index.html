@@ -1,18 +1,18 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pico 4 Ultra Full Sync</title>
+    <title>Pico 4 Ultra Full Sync Pro</title>
     <meta charset="UTF-8">
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
-        button { padding: 40px 80px; font-size: 30px; cursor: pointer; background: #00BCD4; color: white; border: none; border-radius: 20px; box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
-        #status { margin-top: 20px; color: #00E676; font-family: monospace; }
+        button { padding: 40px 80px; font-size: 30px; cursor: pointer; background: #FF9800; color: white; border: none; border-radius: 20px; box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
+        #status { margin-top: 20px; color: #03A9F4; font-family: monospace; }
     </style>
 </head>
 <body>
-    <h1>Pico 4 Ultra Full Sync</h1>
-    <button id="startBtn">开始全量同步</button>
-    <div id="status">模式: 6DOF + Buttons + Rotation</div>
+    <h1>Pico 4 Ultra Pro Sync</h1>
+    <button id="startBtn">启动全量同步</button>
+    <div id="status">Ready: Pos + Rot + Buttons + Joystick</div>
     <canvas id="xrCanvas" style="display:none;"></canvas>
 
     <script>
@@ -40,19 +40,20 @@
                                 const payload = {
                                     type: 'controller',
                                     handedness: inputSource.handedness,
-                                    position: gripPose.transform.position,    // {x, y, z}
-                                    orientation: gripPose.transform.orientation, // {x, y, z, w}
+                                    position: gripPose.transform.position,
+                                    orientation: gripPose.transform.orientation,
                                     buttons: [],
                                     axes: []
                                 };
 
-                                // 采集按键状态
                                 if (gamepad) {
+                                    // 采集所有按钮状态
                                     payload.buttons = gamepad.buttons.map(b => ({
                                         pressed: b.pressed,
                                         value: b.value
                                     }));
-                                    payload.axes = gamepad.axes; // 摇杆数据
+                                    // 采集所有轴（摇杆 X, Y）
+                                    payload.axes = [gamepad.axes[2], gamepad.axes[3]]; // WebXR Pico 摇杆通常在 index 2 和 3
                                 }
 
                                 fetch(targetUrl, {
@@ -68,7 +69,7 @@
                 }
 
                 session.requestAnimationFrame(onFrame);
-                status.innerText = "全量数据同步中...";
+                status.innerText = "数据传输中...";
 
             } catch (e) {
                 status.innerText = "错误: " + e.message;
