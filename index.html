@@ -1,74 +1,173 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pico 4 Ultra Full Sync Pro</title>
+    <title>Pico 4 Ultra Full Sync Pro + Video</title>
     <meta charset="UTF-8">
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
         button { padding: 40px 80px; font-size: 30px; cursor: pointer; background: #FF9800; color: white; border: none; border-radius: 20px; box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
         #status { margin-top: 20px; color: #03A9F4; font-family: monospace; }
+        #wsStatus { color: #4CAF50; font-size: 14px; margin-top: 5px; }
+        #videoOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; opacity: 0.5; display: none; }
+        #preview { border: 2px solid #555; max-width: 80%; max-height: 50vh; margin-top: 10px; display: block; background: #111; }
     </style>
 </head>
 <body>
     <h1>Pico 4 Ultra Pro Sync</h1>
-    <button id="startBtn">启动全量同步</button>
-    <div id="status">Sync: Head + Hands + Buttons</div>
+    <button id="startBtn">启动全量同步 + 视频流</button>
+    <div style="margin-top: 20px;">
+        <input type="checkbox" id="stereoToggle" style="width: 20px; height: 20px;">
+        <label for="stereoToggle" style="font-size: 24px; vertical-align: bottom;">启用双目 3D 模式 (SBS Stereo)</label>
+    </div>
+    <div id="status">Sync: Data Channel</div>
+    <div id="wsStatus">Video: Disconnected (Retrying...)</div>
+    <img id="preview" src="" alt="等待视频数据流..." />
     <canvas id="xrCanvas" style="display:none;"></canvas>
 
     <script>
-        const status = document.getElementById('status');
+        const statusText = document.getElementById('status');
+        const wsStatusText = document.getElementById('wsStatus');
+        const preview = document.getElementById('preview');
         const canvas = document.getElementById('xrCanvas');
         const gl = canvas.getContext('webgl', { xrCompatible: true });
-        const targetUrl = `http://127.0.0.1:8765`;
+        
+        const poseUrl = `http://127.0.0.1:8765`;
+        const wsUrl = `ws://127.0.0.1:8787`;
+
+        let videoTexture = null;
+        let videoImage = new Image();
+        let isPresenting = false;
+
+        // WebSocket 自动重连逻辑
+        function connectVideo() {
+            const ws = new WebSocket(wsUrl);
+            ws.binaryType = 'blob';
+            
+            ws.onopen = () => {
+                wsStatusText.innerText = "Video: Connected";
+                wsStatusText.style.color = "#4CAF50";
+            };
+
+            ws.onmessage = (event) => {
+                const blob = event.data;
+                const url = URL.createObjectURL(blob);
+                videoImage.src = url;
+                if (!isPresenting) preview.src = url;
+                videoImage.onload = () => {
+                    URL.revokeObjectURL(url);
+                    updateTexture();
+                };
+            };
+
+            ws.onclose = () => {
+                wsStatusText.innerText = "Video: Disconnected (Retrying...)";
+                wsStatusText.style.color = "#f44336";
+                setTimeout(connectVideo, 1000);
+            };
+
+            ws.onerror = () => ws.close();
+        }
+
+        connectVideo();
+
+        function updateTexture() {
+            if (!gl || !videoImage.complete) return;
+            if (!videoTexture) {
+                videoTexture = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, videoTexture);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            }
+            gl.bindTexture(gl.TEXTURE_2D, videoTexture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, videoImage);
+        }
+
+        // WebGL Shader 逻辑保持不变...
+        const vsSource = `attribute vec2 position; attribute vec2 uv; varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 0.0, 1.0); }`;
+        const fsSource = `precision mediump float; varying vec2 vUv; uniform sampler2D uTexture; void main() { gl_FragColor = texture2D(uTexture, vUv); }`;
+        function createShader(gl, type, source) { const s = gl.createShader(type); gl.shaderSource(s, source); gl.compileShader(s); return s; }
+        const program = gl.createProgram();
+        gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+        gl.linkProgram(program);
+        const posBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+        const uvBuffer = gl.createBuffer();
 
         async function startVR() {
             try {
+                isPresenting = true;
                 const session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'] });
                 session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
                 const refSpace = await session.requestReferenceSpace('local-floor');
                 
                 function onFrame(time, frame) {
-                    frame.session.requestAnimationFrame(onFrame);
-                    
-                    // 1. 获取头部 (Viewer) 姿态
+                    session.requestAnimationFrame(onFrame);
                     const viewerPose = frame.getViewerPose(refSpace);
                     if (viewerPose) {
-                        fetch(targetUrl, {
-                            method: 'POST', mode: 'no-cors',
-                            body: JSON.stringify({
-                                type: 'head',
-                                position: viewerPose.transform.position,
-                                orientation: viewerPose.transform.orientation
-                            })
-                        }).catch(() => {});
-                    }
+                        // 姿态同步
+                        fetch(poseUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ type: 'head', position: viewerPose.transform.position, orientation: viewerPose.transform.orientation }) }).catch(() => {});
 
-                    // 2. 获取手柄姿态
-                    for (const inputSource of frame.session.inputSources) {
+                // 渲染视频流到 VR 每一帧
+                        gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
+                        // 清除颜色和深度缓冲区
+                        gl.clearColor(0, 0, 0, 1);
+                        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+                        if (videoTexture) {
+                            gl.useProgram(program);
+                            const posLoc = gl.getAttribLocation(program, 'position');
+                            gl.enableVertexAttribArray(posLoc);
+                            gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+                            gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+                            const uvLoc = gl.getAttribLocation(program, 'uv');
+                            gl.enableVertexAttribArray(uvLoc);
+                            
+                            const isStereo = document.getElementById('stereoToggle').checked;
+
+                            for (const view of viewerPose.views) {
+                                const viewport = session.renderState.baseLayer.getViewport(view);
+                                gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+                                
+                                let uvs;
+                                if (isStereo) {
+                                    // 双目 SBS 模式：左眼取左半边(0~0.5)，右眼取右半边(0.5~1)
+                                    if (view.eye === 'left') {
+                                        uvs = new Float32Array([0, 1, 0.5, 1, 0, 0, 0.5, 0]);
+                                    } else {
+                                        uvs = new Float32Array([0.5, 1, 1, 1, 0.5, 0, 1, 0]);
+                                    }
+                                } else {
+                                    // 单目模式：全图铺满
+                                    uvs = new Float32Array([0, 1, 1, 1, 0, 0, 1, 0]);
+                                }
+
+                                gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
+                                gl.bufferData(gl.ARRAY_BUFFER, uvs, gl.STATIC_DRAW);
+                                gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 0, 0);
+                                gl.bindTexture(gl.TEXTURE_2D, videoTexture);
+                                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                            }
+                        }
+                    }
+                    // 手柄数据同步逻辑...
+                    for (const inputSource of session.inputSources) {
                         if (inputSource.gripSpace) {
                             const gripPose = frame.getPose(inputSource.gripSpace, refSpace);
                             if (gripPose) {
                                 const gamepad = inputSource.gamepad;
-                                const payload = {
-                                    type: 'controller',
-                                    handedness: inputSource.handedness,
-                                    position: gripPose.transform.position,
-                                    orientation: gripPose.transform.orientation,
-                                    buttons: gamepad ? gamepad.buttons.map(b => ({ pressed: b.pressed, value: b.value })) : [],
-                                    axes: gamepad ? [gamepad.axes[2], gamepad.axes[3]] : []
-                                };
-                                fetch(targetUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) }).catch(() => {});
+                                fetch(poseUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ type: 'controller', handedness: inputSource.handedness, position: gripPose.transform.position, orientation: gripPose.transform.orientation, buttons: gamepad ? gamepad.buttons.map(b => ({ pressed: b.pressed, value: b.value })) : [], axes: gamepad ? [gamepad.axes[2], gamepad.axes[3]] : [] }) }).catch(() => {});
                             }
                         }
                     }
-
-                    gl.bindFramebuffer(gl.FRAMEBUFFER, frame.session.renderState.baseLayer.framebuffer);
-                    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
                 }
                 session.requestAnimationFrame(onFrame);
-                status.innerText = "数据传输中...";
+                statusText.innerText = "数据传输中...";
             } catch (e) {
-                status.innerText = "错误: " + e.message;
+                statusText.innerText = "错误: " + e.message;
             }
         }
         document.getElementById('startBtn').onclick = startVR;
