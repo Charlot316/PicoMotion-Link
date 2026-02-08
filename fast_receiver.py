@@ -12,8 +12,9 @@ log.setLevel(logging.ERROR)
 UNITY_PORT = 9000
 unity_sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-# 存储手柄实时状态
-ctrl_states = {
+# 存储所有设备状态
+states = {
+    "head": {"pos": None, "initial_pos": None, "euler": [0,0,0]},
     "left": {"pos": None, "initial_pos": None, "euler": [0,0,0], "btns": {}, "axes": [0,0]},
     "right": {"pos": None, "initial_pos": None, "euler": [0,0,0], "btns": {}, "axes": [0,0]}
 }
@@ -31,74 +32,70 @@ def quat_to_euler(q):
     return [math.degrees(pitch), math.degrees(yaw), math.degrees(roll)]
 
 def print_ui():
-    """在终端固定位置打印双手数据"""
-    # ANSI 序列：\033[H 回到顶端，\033[J 清除屏幕
     sys.stdout.write("\033[H") 
-    sys.stdout.write("=== Pico 4 Ultra Motion Link (Active) ===\n")
-    sys.stdout.write("提示: 按下摇杆(Joystick Click)可重置该手柄原点\n")
-    sys.stdout.write("-" * 80 + "\n")
+    sys.stdout.write("=== Pico 4 Ultra Motion Link (Full 6DOF) ===\n")
+    sys.stdout.write("提示: 按下任一摇杆可重置 [全设备] 初始原点\n")
+    sys.stdout.write("-" * 90 + "\n")
     
-    for side in ["left", "right"]:
-        s = ctrl_states[side]
+    for key in ["head", "left", "right"]:
+        s = states[key]
         if s["pos"] and s["initial_pos"]:
             dx = s["pos"]["x"] - s["initial_pos"]["x"]
             dy = s["pos"]["y"] - s["initial_pos"]["y"]
             dz = s["pos"]["z"] - s["initial_pos"]["z"]
             
-            # 按钮解析
-            # 0:Trigger, 1:Grip, 3:Joystick, 4:Primary(A/X), 5:Secondary(B/Y)
-            btns = s["btns"]
-            trig = "T" if btns.get(0) else "_"
-            grip = "G" if btns.get(1) else "_"
-            b1 = ("X" if side=="left" else "A") if btns.get(4) else "_"
-            b2 = ("Y" if side=="left" else "B") if btns.get(5) else "_"
-            js_click = "Click" if btns.get(3) else "_____"
-            
-            # 摇杆轴
-            jx, jy = s["axes"][0], s["axes"][1]
-            
-            line = f"{side.upper():5} | Pos:{dx:>6.2f},{dy:>6.2f},{dz:>6.2f} | Ang:{s['euler'][0]:>4.0f},{s['euler'][1]:>4.0f},{s['euler'][2]:>4.0f} | [{trig}{grip}{b1}{b2}] | JS:({jx:>5.2f},{jy:>5.2f}) {js_click}\n"
+            if key == "head":
+                line = f"{key.upper():5} | Pos:{dx:>6.2f},{dy:>6.2f},{dz:>6.2f} | Ang:{s['euler'][0]:>4.0f},{s['euler'][1]:>4.0f},{s['euler'][2]:>4.0f} | [HMD Tracking]\n"
+            else:
+                btns = s["btns"]
+                trig = "T" if btns.get(0) else "_"
+                grip = "G" if btns.get(1) else "_"
+                b1 = ("X" if key=="left" else "A") if btns.get(4) else "_"
+                b2 = ("Y" if key=="left" else "B") if btns.get(5) else "_"
+                js_x, js_y = s["axes"][0], s["axes"][1]
+                line = f"{key.upper():5} | Pos:{dx:>6.2f},{dy:>6.2f},{dz:>6.2f} | Ang:{s['euler'][0]:>4.0f},{s['euler'][1]:>4.0f},{s['euler'][2]:>4.0f} | [{trig}{grip}{b1}{b2}] | JS:({js_x:>5.2f},{js_y:>5.2f})\n"
             sys.stdout.write(line)
         else:
-            sys.stdout.write(f"{side.upper():5} | 等待连接...\n")
+            sys.stdout.write(f"{key.upper():5} | 等待数据...\n")
     
-    sys.stdout.write("-" * 80 + "\n")
+    sys.stdout.write("-" * 90 + "\n")
     sys.stdout.flush()
 
 @app.route('/', methods=['POST'])
 def receive():
     try:
         data = json.loads(request.data.decode())
-        side = data.get("handedness")
-        if side not in ctrl_states: return '', 204
+        dtype = data.get("type")
+        
+        if dtype == "head":
+            key = "head"
+        else:
+            key = data.get("handedness")
+            
+        if key not in states: return '', 204
         
         pos = data.get("position")
-        quat = data.get("orientation")
-        btns_list = data.get("buttons", [])
-        axes = data.get("axes", [])
+        states[key]["pos"] = pos
+        states[key]["euler"] = quat_to_euler(data.get("orientation"))
         
-        # 更新状态
-        ctrl_states[side]["pos"] = pos
-        ctrl_states[side]["euler"] = quat_to_euler(quat)
-        ctrl_states[side]["axes"] = axes
-        
-        # 转换按钮列表为字典
-        for i, b in enumerate(btns_list):
-            ctrl_states[side]["btns"][i] = b['pressed']
+        if dtype == "controller":
+            # 更新按键和轴
+            btns_list = data.get("buttons", [])
+            for i, b in enumerate(btns_list):
+                states[key]["btns"][i] = b['pressed']
+            states[key]["axes"] = data.get("axes", [0,0])
 
-        # 检测摇杆点击 -> 复位
-        if ctrl_states[side]["btns"].get(3): # 摇杆按下
-            ctrl_states[side]["initial_pos"] = pos
-            # 可以在这里加入旋转复位的逻辑（如果需要的话）
-            
-        # 自动初始化
-        if ctrl_states[side]["initial_pos"] is None:
-            ctrl_states[side]["initial_pos"] = pos
+            # 如果点击摇杆，重置所有设备原点
+            if states[key]["btns"].get(3):
+                for k in states:
+                    if states[k]["pos"]: states[k]["initial_pos"] = states[k]["pos"]
 
-        # 转发
+        # 首次初始化
+        if states[key]["initial_pos"] is None:
+            states[key]["initial_pos"] = pos
+
+        # 转发 Unity
         unity_sender.sendto(request.data, ("127.0.0.1", UNITY_PORT))
-        
-        # 渲染 UI
         print_ui()
             
     except Exception:
@@ -106,6 +103,5 @@ def receive():
     return '', 204
 
 if __name__ == '__main__':
-    # 先清一次屏
     sys.stdout.write("\033[2J\033[H")
     app.run(host='0.0.0.0', port=8765, threaded=True)

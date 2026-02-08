@@ -12,7 +12,7 @@
 <body>
     <h1>Pico 4 Ultra Pro Sync</h1>
     <button id="startBtn">启动全量同步</button>
-    <div id="status">Ready: Pos + Rot + Buttons + Joystick</div>
+    <div id="status">Sync: Head + Hands + Buttons</div>
     <canvas id="xrCanvas" style="display:none;"></canvas>
 
     <script>
@@ -23,15 +23,27 @@
 
         async function startVR() {
             try {
-                const session = await navigator.xr.requestSession('immersive-vr', {
-                    requiredFeatures: ['local-floor']
-                });
-
+                const session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'] });
                 session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
                 const refSpace = await session.requestReferenceSpace('local-floor');
                 
                 function onFrame(time, frame) {
                     frame.session.requestAnimationFrame(onFrame);
+                    
+                    // 1. 获取头部 (Viewer) 姿态
+                    const viewerPose = frame.getViewerPose(refSpace);
+                    if (viewerPose) {
+                        fetch(targetUrl, {
+                            method: 'POST', mode: 'no-cors',
+                            body: JSON.stringify({
+                                type: 'head',
+                                position: viewerPose.transform.position,
+                                orientation: viewerPose.transform.orientation
+                            })
+                        }).catch(() => {});
+                    }
+
+                    // 2. 获取手柄姿态
                     for (const inputSource of frame.session.inputSources) {
                         if (inputSource.gripSpace) {
                             const gripPose = frame.getPose(inputSource.gripSpace, refSpace);
@@ -42,40 +54,23 @@
                                     handedness: inputSource.handedness,
                                     position: gripPose.transform.position,
                                     orientation: gripPose.transform.orientation,
-                                    buttons: [],
-                                    axes: []
+                                    buttons: gamepad ? gamepad.buttons.map(b => ({ pressed: b.pressed, value: b.value })) : [],
+                                    axes: gamepad ? [gamepad.axes[2], gamepad.axes[3]] : []
                                 };
-
-                                if (gamepad) {
-                                    // 采集所有按钮状态
-                                    payload.buttons = gamepad.buttons.map(b => ({
-                                        pressed: b.pressed,
-                                        value: b.value
-                                    }));
-                                    // 采集所有轴（摇杆 X, Y）
-                                    payload.axes = [gamepad.axes[2], gamepad.axes[3]]; // WebXR Pico 摇杆通常在 index 2 和 3
-                                }
-
-                                fetch(targetUrl, {
-                                    method: 'POST',
-                                    mode: 'no-cors',
-                                    body: JSON.stringify(payload)
-                                }).catch(() => {});
+                                fetch(targetUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) }).catch(() => {});
                             }
                         }
                     }
+
                     gl.bindFramebuffer(gl.FRAMEBUFFER, frame.session.renderState.baseLayer.framebuffer);
                     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
                 }
-
                 session.requestAnimationFrame(onFrame);
                 status.innerText = "数据传输中...";
-
             } catch (e) {
                 status.innerText = "错误: " + e.message;
             }
         }
-
         document.getElementById('startBtn').onclick = startVR;
     </script>
 </body>

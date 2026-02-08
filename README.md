@@ -9,12 +9,12 @@ It leverages the power of **WebXR** and **ADB Port Forwarding** to bypass networ
 ---
 
 ## 🌟 Features
-- **Dual-Hand 6DOF Tracking**: Real-time X, Y, Z position and Euler angles for both controllers simultaneously.
+- **Full 6DOF Tracking**: Real-time X, Y, Z position and Euler angles for **Head (HMD)** and **Both Controllers** simultaneously.
 - **Full Input Mapping**: Support for all buttons:
   - **Left**: X, Y, Trigger, Grip, Joystick Click.
   - **Right**: A, B, Trigger, Grip, Joystick Click.
 - **Live Joystick Data**: Real-time (X, Y) axis values.
-- **One-Click Reset**: Press the **Joystick Click** to instantly recalibrate the origin (0,0,0) for each controller.
+- **Global Reset**: Press any **Joystick Click** to instantly recalibrate the origin (0,0,0) for all devices (Head & Hands).
 - **Zero-Config Network**: Uses `adb reverse` to tunnel data over USB, bypassing Wi-Fi lag and firewall issues.
 - **Terminal UI**: Clean, dual-row terminal display for real-time monitoring.
 - **Unity Ready**: Built-in UDP forwarding (Port 9000) for instant integration.
