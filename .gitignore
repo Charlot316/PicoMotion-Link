@@ -1,0 +1,20 @@
+# Logs
+*.log
+http.log
+receiver.log
+server.log
+output.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# SSL Keys
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db

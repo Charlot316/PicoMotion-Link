@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pico 4 Ultra Full Sync</title>
+    <meta charset="UTF-8">
+    <style>
+        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        button { padding: 40px 80px; font-size: 30px; cursor: pointer; background: #00BCD4; color: white; border: none; border-radius: 20px; box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
+        #status { margin-top: 20px; color: #00E676; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <h1>Pico 4 Ultra Full Sync</h1>
+    <button id="startBtn">开始全量同步</button>
+    <div id="status">模式: 6DOF + Buttons + Rotation</div>
+    <canvas id="xrCanvas" style="display:none;"></canvas>
+
+    <script>
+        const status = document.getElementById('status');
+        const canvas = document.getElementById('xrCanvas');
+        const gl = canvas.getContext('webgl', { xrCompatible: true });
+        const targetUrl = `http://127.0.0.1:8765`;
+
+        async function startVR() {
+            try {
+                const session = await navigator.xr.requestSession('immersive-vr', {
+                    requiredFeatures: ['local-floor']
+                });
+
+                session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+                const refSpace = await session.requestReferenceSpace('local-floor');
+                
+                function onFrame(time, frame) {
+                    frame.session.requestAnimationFrame(onFrame);
+                    for (const inputSource of frame.session.inputSources) {
+                        if (inputSource.gripSpace) {
+                            const gripPose = frame.getPose(inputSource.gripSpace, refSpace);
+                            if (gripPose) {
+                                const gamepad = inputSource.gamepad;
+                                const payload = {
+                                    type: 'controller',
+                                    handedness: inputSource.handedness,
+                                    position: gripPose.transform.position,    // {x, y, z}
+                                    orientation: gripPose.transform.orientation, // {x, y, z, w}
+                                    buttons: [],
+                                    axes: []
+                                };
+
+                                // 采集按键状态
+                                if (gamepad) {
+                                    payload.buttons = gamepad.buttons.map(b => ({
+                                        pressed: b.pressed,
+                                        value: b.value
+                                    }));
+                                    payload.axes = gamepad.axes; // 摇杆数据
+                                }
+
+                                fetch(targetUrl, {
+                                    method: 'POST',
+                                    mode: 'no-cors',
+                                    body: JSON.stringify(payload)
+                                }).catch(() => {});
+                            }
+                        }
+                    }
+                    gl.bindFramebuffer(gl.FRAMEBUFFER, frame.session.renderState.baseLayer.framebuffer);
+                    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+                }
+
+                session.requestAnimationFrame(onFrame);
+                status.innerText = "全量数据同步中...";
+
+            } catch (e) {
+                status.innerText = "错误: " + e.message;
+            }
+        }
+
+        document.getElementById('startBtn').onclick = startVR;
+    </script>
+</body>
+</html>
