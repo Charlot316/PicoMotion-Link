@@ -1,19 +1,16 @@
 import asyncio
 import socket
 import websockets
-import threading
-import os
 import struct
 import time
+import os
 
-# 配置
-TCP_PORT = 8786
+# VSSP v1.0 Constants
+VSSP_MAGIC = b"VSSP"
+UDP_PORT = 8766
 WS_PORT = 8787
-LOG_FILE = "video_streamer.log"
-
-# 全局存储最新帧
-latest_frame = None
-frame_lock = threading.Lock()
+THRESHOLD = 1.0
+LOG_FILE = "vssp.log"
 
 
 def log(msg):
@@ -24,103 +21,121 @@ def log(msg):
         f.write(formatted_msg + "\n")
 
 
-def recv_all(sock, n):
-    data = b""
-    while len(data) < n:
-        try:
-            packet = sock.recv(n - len(data))
-            if not packet:
-                log(f"Recv failed: socket closed during recv_all (got {len(data)}/{n})")
-                return None
-            data += packet
-        except Exception as e:
-            log(f"Recv exception: {e}")
-            return None
-    return data
+class FrameBuffer:
+    def __init__(self, frame_id, eye, packet_count, mode):
+        self.frame_id = frame_id
+        self.eye = eye
+        self.packet_count = packet_count
+        self.mode = mode
+        self.received_mask = [False] * packet_count
+        self.data = [None] * packet_count
+        self.received_count = 0
+        self.last_update = time.time()
 
 
-def tcp_receive_thread():
-    global latest_frame
-    if os.path.exists(LOG_FILE):
-        os.remove(LOG_FILE)
+class VSSP_Relay:
+    def __init__(self):
+        self.frames = {}  # Key: (frame_id, eye)
+        self.ws_clients = set()
+        if os.path.exists(LOG_FILE):
+            os.remove(LOG_FILE)
 
-    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        server_sock.bind(("0.0.0.0", TCP_PORT))
-    except Exception as e:
-        log(f"CRITICAL: Could not bind to port {TCP_PORT}: {e}")
-        return
+    async def udp_receiver(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # Increase UDP buffer for macOS
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+        sock.bind(("0.0.0.0", UDP_PORT))
+        sock.setblocking(False)
+        log(f"VSSP UDP Listener active on {UDP_PORT}")
 
-    server_sock.listen(5)
-    log(f"TCP HD Video Server listening on {TCP_PORT}")
-
-    while True:
-        try:
-            client_sock, addr = server_sock.accept()
-            log(f"UNITY CONNECTED: {addr}")
-
-            # 使用 TCP 流式读取
-            # 协议: [0x42] [Length: 4 bytes big-endian] [Image Data]
-
-            client_sock.settimeout(None)  # 禁用超时，避免 Unity 暂停时断连
-
-            while True:
-                # 1. 读这帧的总头：1 (magic) + 4 (len) = 5 bytes
-                # 这样可以减少系统调用次数
-                head_blob = recv_all(client_sock, 5)
-                if not head_blob:
-                    break
-
-                magic = head_blob[0]
-                if magic != 0x42:
-                    log(
-                        f"Protocol Error: Invalid Magic Byte {hex(magic)}. Reseting connection."
-                    )
-                    break
-
-                img_len = struct.unpack(">I", head_blob[1:5])[0]
-
-                # 2. 校验
-                if img_len > 20_000_000:  # 20MB
-                    log(f"Oversized frame: {img_len}")
-                    break
-
-                # 3. 读体
-                img_data = recv_all(client_sock, img_len)
-                if not img_data:
-                    break
-
-                # 4. 更新
-                with frame_lock:
-                    latest_frame = img_data
-        except Exception as e:
-            log(f"Stream Error: {e}")
-        finally:
-            client_sock.close()
-
-
-async def video_server(websocket):
-    log(f"WS Browser connected: {websocket.remote_address}")
-    last_sent_frame = None
-    try:
+        loop = asyncio.get_event_loop()
+        packet_count_debug = 0
         while True:
-            current_frame = None
-            with frame_lock:
-                current_frame = latest_frame
-            if current_frame and current_frame != last_sent_frame:
-                await websocket.send(current_frame)
-                last_sent_frame = current_frame
-            await asyncio.sleep(0.01)
-    except websockets.exceptions.ConnectionClosed:
-        log("WS Browser disconnected")
+            try:
+                data, addr = await loop.sock_recvfrom(sock, 2048)
+                packet_count_debug += 1
+                if packet_count_debug % 100 == 0:
+                    log(f"Received {packet_count_debug} UDP packets from {addr}")
+
+                if len(data) < 24:
+                    continue
+
+                magic = data[0:4]
+                if magic != VSSP_MAGIC:
+                    continue
+
+                # VSSP Header: 4(magic), 4(frame_id), 1(mode), 1(eye), 1(codec), 1(flags), 2(p_id), 2(p_count), 2(p_size), 4(timestamp) = 22 bytes
+                # The remaining 2 bytes in [0:24] are alignment padding.
+                header = struct.unpack("<IIBBBBHHHI", data[0:22])
+                _, frame_id, mode, eye, codec, flags, p_id, p_count, p_size, ts = header
+                payload = data[24 : 24 + p_size]
+
+                # Cleanup old frames cache
+                now = time.time()
+                if len(self.frames) > 30:
+                    self.frames = {
+                        k: v
+                        for k, v in self.frames.items()
+                        if now - v.last_update < 0.2
+                    }
+
+                key = (frame_id, eye)
+                if key not in self.frames:
+                    self.frames[key] = FrameBuffer(frame_id, eye, p_count, mode)
+
+                fb = self.frames[key]
+                if p_id < fb.packet_count and not fb.received_mask[p_id]:
+                    fb.received_mask[p_id] = True
+                    fb.data[p_id] = payload
+                    fb.received_count += 1
+                    fb.last_update = now
+
+                # Check completion logic
+                if fb.received_count == fb.packet_count:
+                    log(
+                        f"Frame {frame_id} (Eye {eye}) COMPLETE. Packets: {fb.received_count}/{fb.packet_count}. Size: {sum(len(x) for x in fb.data if x)} bytes"
+                    )
+                    # Assemble and push to web clients
+                    full_frame = b"".join([p for p in fb.data if p])
+                    await self.broadcast_frame(full_frame, mode, eye, codec)
+                    fb.received_count = -99999
+            except Exception:
+                pass
+
+    async def broadcast_frame(self, data, mode, eye, codec):
+        log(
+            f"Attempting to broadcast frame (mode={mode}, eye={eye}, codec={codec}, size={len(data)}) to {len(self.ws_clients)} clients."
+        )
+        if not self.ws_clients:
+            return
+        # Custom Web Relay Packet: [size:4][mode:1][eye:1][codec:1][payload]
+        header = struct.pack("<IBBB", len(data), mode, eye, codec)
+        packet = header + data
+
+        # Concurrent broadcast
+        disconnected = set()
+        for client in list(self.ws_clients):
+            try:
+                await client.send(packet)
+            except Exception:
+                disconnected.add(client)
+        for d in disconnected:
+            self.ws_clients.discard(d)
+
+    async def ws_handler(self, websocket, path=None):
+        self.ws_clients.add(websocket)
+        log(f"Browser connected to VSSP Stream. Active clients: {len(self.ws_clients)}")
+        try:
+            await websocket.wait_closed()
+        finally:
+            self.ws_clients.discard(websocket)
 
 
 async def main():
-    threading.Thread(target=tcp_receive_thread, daemon=True).start()
-    log(f"WebSocket interface for PICO browser ready on ws://localhost:{WS_PORT}")
-    async with websockets.serve(video_server, "0.0.0.0", WS_PORT):
-        await asyncio.get_running_loop().create_future()
+    relay = VSSP_Relay()
+    log("Starting VSSP v1.0 Unified Relay (UDP -> WS)")
+    async with websockets.serve(relay.ws_handler, "0.0.0.0", WS_PORT):
+        await relay.udp_receiver()
 
 
 if __name__ == "__main__":
