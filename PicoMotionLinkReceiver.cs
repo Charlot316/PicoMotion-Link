@@ -3,64 +3,151 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Collections.Generic;
+using Autohand;
 
+#if UNITY_EDITOR
 public class PicoMotionLinkReceiver : MonoBehaviour
 {
     public int port = 9000;
-    public Transform leftHand;
-    public Transform rightHand;
     
-    struct ControllerData {
-        public string side;
-        public Vector3 rel_pos;
-        public Quaternion rot;
+    private Hand leftHand;
+    private Hand rightHand;
+    
+    private UdpClient udpClient;
+    private Thread receiveThread;
+    
+    [System.Serializable]
+    public class PicoButton {
+        public bool pressed;
+        public float value;
     }
 
-    UdpClient udpClient;
-    Thread receiveThread;
-    string lastJson = "";
+    [System.Serializable]
+    public class PicoData {
+        public string type;
+        public string handedness; 
+        public Vector3 position;  
+        public Quaternion orientation; 
+        public List<PicoButton> buttons;
+        public List<float> axes; // [x, y]
+    }
+
+    private PicoData leftDataCache;
+    private PicoData rightDataCache;
+    private PicoData headDataCache;
+    private readonly object dataLock = new object();
+    private float lastReceiveTime = 0;
+
+    public bool IsReceiving {
+        get { return Time.time - lastReceiveTime < 2f; }
+    }
+
+
+    // 按钮状态记录
+    private bool lastLeftTrigger = false;
+    private bool lastLeftGrip = false;
+    private bool lastRightTrigger = false;
+    private bool lastRightGrip = false;
 
     void Start() {
-        udpClient = new UdpClient(port);
-        receiveThread = new Thread(new ThreadStart(ReceiveData));
-        receiveThread.IsBackground = true;
-        receiveThread.Start();
+        InitializeHands();
+        StartUDP();
+    }
+
+    void InitializeHands() {
+        var hands = Object.FindObjectsOfType<Hand>();
+        foreach (var hand in hands) {
+            if (hand.left) leftHand = hand;
+            else rightHand = hand;
+        }
+    }
+
+    void StartUDP() {
+        try {
+            udpClient = new UdpClient(port);
+            receiveThread = new Thread(new ThreadStart(ReceiveData));
+            receiveThread.IsBackground = true;
+            receiveThread.Start();
+            Debug.Log($"[PicoLink] UDP Receiver started on port {port}");
+        } catch (System.Exception e) {
+            Debug.LogError($"[PicoLink] UDP Error: {e.Message}");
+        }
     }
 
     void ReceiveData() {
         IPEndPoint anyIP = new IPEndPoint(IPAddress.Any, 0);
         while (true) {
             try {
+                if (udpClient == null) break;
                 byte[] data = udpClient.Receive(ref anyIP);
-                lastJson = Encoding.UTF8.GetString(data);
-            } catch { }
+                if (data == null || data.Length == 0) continue;
+
+                string json = Encoding.UTF8.GetString(data);
+                
+                var picoData = JsonUtility.FromJson<PicoData>(json);
+                if (picoData != null) {
+                    lock (dataLock) {
+                        if (picoData.type == "controller") {
+                            if (picoData.handedness == "left") leftDataCache = picoData;
+                            else if (picoData.handedness == "right") rightDataCache = picoData;
+                        } else if (picoData.type == "head") {
+                            headDataCache = picoData;
+                        }
+                        lastReceiveTime = Time.time;
+                    }
+                }
+            } catch {
+                if (udpClient == null) break;
+            }
         }
     }
 
     void Update() {
-        if (string.IsNullOrEmpty(lastJson)) return;
-
-        // 解析 Python 传来的 JSON
-        // 注意：这里需要你定义对应的 JSON 结构体或使用 SimpleJSON
-        var data = JsonUtility.FromJson<PicoData>(lastJson);
-        
-        Transform target = data.side == "left" ? leftHand : rightHand;
-        if (target != null) {
-            // 注意：WebXR 的坐标系和 Unity 略有不同，可能需要 Z 轴翻转
-            target.localPosition = new Vector3(data.pos.x, data.pos.y, -data.pos.z);
-            target.localRotation = new Quaternion(data.rot.x, data.rot.y, data.rot.z, data.rot.w);
+        // 仅处理按钮事件，位置同步移至 HandDesktopControllerLink
+        lock (dataLock) {
+            ProcessButtons(leftHand, leftDataCache, ref lastLeftTrigger, ref lastLeftGrip);
+            ProcessButtons(rightHand, rightDataCache, ref lastRightTrigger, ref lastRightGrip);
         }
     }
 
-    [System.Serializable]
-    public class PicoData {
-        public string side;
-        public Vector3 pos;
-        public Quaternion rot;
+    void ProcessButtons(Hand hand, PicoData data, ref bool lastTrigger, ref bool lastGrip) {
+        if (hand == null || data == null || data.buttons == null || data.buttons.Count < 2) return;
+
+        // 标准 WebXR 映射：Index 0 为 Index Trigger, Index 1 为 Side Grip
+        bool currentSqueezeBtn = data.buttons[0].pressed; 
+        bool currentGrabBtn = data.buttons[1].pressed;    
+
+        if (currentGrabBtn && !lastGrip) hand.Grab();
+        else if (!currentGrabBtn && lastGrip) hand.Release();
+
+        if (currentSqueezeBtn && !lastTrigger) hand.Squeeze();
+        else if (!currentSqueezeBtn && lastTrigger) hand.Unsqueeze();
+
+        lastTrigger = currentSqueezeBtn;
+        lastGrip = currentGrabBtn;
+    }
+
+    public PicoData GetLatestData(bool isLeft) {
+        lock (dataLock) {
+            return isLeft ? leftDataCache : rightDataCache;
+        }
+    }
+
+    public PicoData GetHeadData() {
+        lock (dataLock) {
+            return headDataCache;
+        }
     }
 
     void OnApplicationQuit() {
-        if (receiveThread != null) receiveThread.Abort();
-        if (udpClient != null) udpClient.Close();
+        if (receiveThread != null && receiveThread.IsAlive) receiveThread.Abort();
+        if (udpClient != null) {
+            udpClient.Close();
+            udpClient = null;
+        }
     }
 }
+#else
+public class PicoMotionLinkReceiver : MonoBehaviour { }
+#endif
