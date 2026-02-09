@@ -55,7 +55,7 @@ class VSSP_Relay:
                 data, addr = await loop.sock_recvfrom(sock, 2048)
                 packet_count_debug += 1
                 if packet_count_debug % 100 == 0:
-                    log(f"Received {packet_count_debug} UDP packets from {addr}")
+                    pass  # High-frequency log removed
 
                 if len(data) < 24:
                     continue
@@ -92,9 +92,7 @@ class VSSP_Relay:
 
                 # Check completion logic
                 if fb.received_count == fb.packet_count:
-                    log(
-                        f"Frame {frame_id} (Eye {eye}) COMPLETE. Packets: {fb.received_count}/{fb.packet_count}. Size: {sum(len(x) for x in fb.data if x)} bytes"
-                    )
+                    # High-frequency log removed
                     # Assemble and push to web clients
                     full_frame = b"".join([p for p in fb.data if p])
                     await self.broadcast_frame(full_frame, mode, eye, codec)
@@ -103,9 +101,6 @@ class VSSP_Relay:
                 pass
 
     async def broadcast_frame(self, data, mode, eye, codec):
-        log(
-            f"Attempting to broadcast frame (mode={mode}, eye={eye}, codec={codec}, size={len(data)}) to {len(self.ws_clients)} clients."
-        )
         if not self.ws_clients:
             return
         # Custom Web Relay Packet: [size:4][mode:1][eye:1][codec:1][payload]
