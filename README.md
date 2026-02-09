@@ -1,55 +1,45 @@
-# PicoMotion-Link 🚀
+# VSSP (VR Stereo Streaming Protocol) v1.0 🚀
 
-**PicoMotion-Link** is a high-performance, ultra-low latency bridge that streams real-time 6DOF pose and controller data (Buttons/Joystick/Gyro) from **Pico 4 Ultra** to **macOS/Windows/Linux** via USB. 
-
-It leverages the power of **WebXR** and **ADB Port Forwarding** to bypass network isolation and security restrictions, providing a seamless data stream for developers and researchers.
+**VSSP** 是一个专为 **Pico 4 Ultra** 设计的高性能、超低延迟 3D 视频串流及追踪同步方案。它实现了从物理设备到 WebXR 端的全链路闭环，支持 6DOF 位移、手柄按键、以及原生双视口 3D 视频流。
 
 [中文文档](#中文说明)
 
 ---
 
 ## 🌟 Features
-- **Full 6DOF Tracking**: Real-time X, Y, Z position and Euler angles for **Head (HMD)** and **Both Controllers** simultaneously.
-- **Full Input Mapping**: Support for all buttons:
-  - **Left**: X, Y, Trigger, Grip, Joystick Click.
-  - **Right**: A, B, Trigger, Grip, Joystick Click.
-- **Live Joystick Data**: Real-time (X, Y) axis values.
-- **Global Reset**: Press any **Joystick Click** to instantly recalibrate the origin (0,0,0) for all devices (Head & Hands).
-- **Zero-Config Network**: Uses `adb reverse` to tunnel data over USB, bypassing Wi-Fi lag and firewall issues.
-- **Terminal UI**: Clean, dual-row terminal display for real-time monitoring.
-- **Unity Ready**: Built-in UDP forwarding (Port 9000) for instant integration.
+- **Independent Eye Rendering**: Dual-viewport stream (Eye 1 / Eye 2) with NO horizontal compression. Full resolution and perfect 3D depth perception.
+- **Ultra-Low Latency**: Optimized UDP transport for video and async WebXR pose sync.
+- **Full 6DOF & Input Mapping**: 
+  - **Head & Hands**: Real-time position and orientation.
+  - **Buttons**: A/B/X/Y, Triggers, Grips, Joysticks.
+- **Head-Gaze Directional Movement**: Left-joystick movement is automatically aligned to where you are looking.
+- **Zero-Config Network**: Tunneling via `adb reverse` over USB for maximum stability.
 
 ## 🚀 Quick Start
-1. **Connect**: Connect your Pico 4 Ultra to your Mac via USB and enable USB Debugging.
-2. **Run**:
+1. **Unity Setup**: Add `PicoVideoStreamer` and `HandDesktopControllerLink` to your scene.
+2. **Connect**: Link your Pico 4 Ultra via USB (Enable USB Debugging).
+3. **Run Server**:
    ```bash
-   chmod +x start.sh
-   ./start.sh
+   chmod +x start.sh && ./start.sh
+   # On Windows: run start_windows.bat
    ```
-3. **VR Mode**: Look into your Pico headset. The browser will automatically open `http://127.0.0.1:8000`. Click **"Start Sync"** to enter VR mode.
-4. **Stream**: Watch your terminal for real-time data flow!
+4. **Enter VR**: The browser on Pico will open `https://127.0.0.1:8000`. Click **"Start VR"** to begin.
 
 ---
 
 <a name="中文说明"></a>
 ## 🌟 功能特性
-- **双持 6自由度追踪**: 同时实时获取双手柄的 X, Y, Z 位移及欧拉角。
-- **全键位映射**: 完美支持所有物理按键：
-  - **左手**: X, Y, 扳机, 握持, 摇杆按下。
-  - **右手**: A, B, 扳机, 握持, 摇杆按下。
-- **实时摇杆数据**: 高精度获取摇杆 (X, Y) 轴数值。
-- **一键复位**: **按下摇杆 (Joystick Click)** 即可瞬间将对应手柄的位置重置为原点 (0,0,0)。
-- **免配置网络**: 利用 `adb reverse` 建立 USB 隧道，无视 Wi-Fi 延迟和防火墙限制。
-- **终端 UI**: 干净的双行终端显示，实时监控双手状态。
-- **Unity 友好**: 内置 UDP 转发（端口 9000），可直接驱动 Unity 项目。
+- **原生双目独立渲染**: 非传统的 SBS 合图模式。左右眼独立采样发送，提供无损的 4:3/正方形视角，3D 深度感极强。
+- **极致低延迟**: 视频流基于 UDP，追踪数据基于异步 WebSocket。
+- **全方位交互**: 
+  - **追踪**: 头部视角、双持手柄位置及姿态。
+  - **摇杆/按键**: 映射 Unity 物理轴向，支持视角导向移动逻辑。
+- **一键部署**: 自动配置 ADB 端口转发，无视 Wi-Fi 环境波动。
 
-## 🛠 环境要求
+## 🛠 开发环境
 - **硬件**: Pico 4 Ultra / Pico 4。
-- **系统**: macOS / Windows / Linux。
-- **软件依赖**: 
-  - Python 3.x
-  - 已安装 ADB (`brew install android-platform-tools`)。
-  - 安装 Flask: `pip install flask`。
+- **Python**: 3.10+ (Dependencies: `websockets`, `cryptography` for HTTPS).
+- **Unity**: 2021.3+ (Integrated via VSSP Provider scripts).
 
 ## 📄 License
 Apache-2.0
