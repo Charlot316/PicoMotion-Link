@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>PICO VSSP v1.0 | Ultra Low Latency Stream</title>
+    <style>
+        :root {
+            --primary: #00f2ff;
+            --bg: #050505;
+            --panel: rgba(20, 20, 25, 0.85);
+            --glass: rgba(255, 255, 255, 0.05);
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background: var(--bg);
+            color: #fff;
+            font-family: 'Inter', -apple-system, system-ui, sans-serif;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* 渲染画布 */
+        #viewport {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            background: #000;
+        }
+
+        .eye-canvas {
+            flex: 1;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+        }
+
+        #canvasMono { display: block; width: 100%; }
+        #canvasLeft, #canvasRight { display: none; }
+
+        .stereo-mode #canvasMono { display: none; }
+        .stereo-mode #canvasLeft, .stereo-mode #canvasRight { display: block; width: 50%; }
+
+        /* 极简控制面板 - 玻璃拟态 */
+        .controls {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--panel);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass);
+            border-radius: 16px;
+            padding: 12px 24px;
+            display: flex;
+            gap: 24px;
+            align-items: center;
+            z-index: 100;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            transition: opacity 0.3s;
+        }
+
+        .controls:hover { opacity: 1; }
+
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .stat-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: rgba(255,255,255,0.4);
+        }
+
+        .stat-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--primary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff4444;
+            display: inline-block;
+            margin-right: 8px;
+            box-shadow: 0 0 10px #ff4444;
+        }
+
+        .status-dot.online {
+            background: #44ff44;
+            box-shadow: 0 0 10px #44ff44;
+        }
+
+        /* 提示层 */
+        #overlay {
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(circle at center, rgba(0,242,255,0.05) 0%, transparent 70%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 200;
+            pointer-events: none;
+            transition: opacity 0.5s;
+        }
+
+        h1 {
+            font-weight: 200;
+            font-size: 42px;
+            margin: 0;
+            letter-spacing: 8px;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body class="mono-mode">
+    <div id="viewport">
+        <canvas id="canvasMono" class="eye-canvas"></canvas>
+        <canvas id="canvasLeft" class="eye-canvas"></canvas>
+        <canvas id="canvasRight" class="eye-canvas"></canvas>
+    </div>
+
+    <div id="overlay">
+        <h1>VSSP v1.0</h1>
+        <p id="msg">等待 Unity 流入...</p>
+    </div>
+
+    <div class="controls">
+        <div class="stat-item">
+            <span class="stat-label">Status</span>
+            <div class="stat-value"><span id="dot" class="status-dot"></span><span id="labelStatus">OFFLINE</span></div>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">Latency</span>
+            <span id="valLatency" class="stat-value">-- ms</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">FPS</span>
+            <span id="valFPS" class="stat-value">0</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">Codec</span>
+            <span id="valCodec" class="stat-value">H.264</span>
+        </div>
+    </div>
+
+    <script>
+        const canvasMono = document.getElementById('canvasMono');
+        const canvasLeft = document.getElementById('canvasLeft');
+        const canvasRight = document.getElementById('canvasRight');
+        const ctxMono = canvasMono.getContext('2d');
+        const ctxLeft = canvasLeft.getContext('2d');
+        const ctxRight = canvasRight.getContext('2d');
+
+        let decoderMono, decoderLeft, decoderRight;
+        let ws;
+        let frameCount = 0;
+        let lastFpsUpdate = performance.now();
+
+        // 核心：WebCodecs 解码器初始化
+        function createDecoder(ctx, eyeName) {
+            return new VideoDecoder({
+                output: (frame) => {
+                    // 高效绘制到 Canvas
+                    ctx.canvas.width = frame.displayWidth;
+                    ctx.canvas.height = frame.displayHeight;
+                    ctx.drawImage(frame, 0, 0);
+                    frame.close();
+                    frameCount++;
+                    
+                    // 隐藏覆盖层
+                    document.getElementById('overlay').style.opacity = '0';
+                },
+                error: (e) => console.error(`${eyeName} Decoder Error:`, e)
+            });
+        }
+
+        function initDecoders() {
+            const config = {
+                codec: 'avc1.42E01E', // Baseline profile
+                optimizeForLatency: true
+            };
+            
+            decoderMono = createDecoder(ctxMono, 'Mono');
+            decoderLeft = createDecoder(ctxLeft, 'Left');
+            decoderRight = createDecoder(ctxRight, 'Right');
+
+            decoderMono.configure(config);
+            decoderLeft.configure(config);
+            decoderRight.configure(config);
+        }
+
+        function connect() {
+            const wsUrl = `ws://${window.location.hostname || 'localhost'}:8790`;
+            ws = new WebSocket(wsUrl);
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+                document.getElementById('dot').classList.add('online');
+                document.getElementById('labelStatus').innerText = 'CONNECTED';
+                initDecoders();
+            };
+
+            ws.onmessage = async (event) => {
+                const buffer = event.data;
+                const view = new DataView(buffer);
+                
+                // VSSP Web Relay Header: size(4), mode(1), eye(1)
+                const size = view.getUint32(0, true);
+                const mode = view.getUint8(4);
+                const eye = view.getUint8(5);
+                const encodedData = new Uint8Array(buffer, 6);
+
+                // 根据模式切换布局
+                if (mode === 0) {
+                    document.body.className = 'mono-mode';
+                } else {
+                    document.body.className = 'stereo-mode';
+                }
+
+                // 送入对应的解码器
+                const chunk = new EncodedVideoChunk({
+                    type: 'key', // 暂时简化处理，正式方案需根据 flags 判断
+                    timestamp: performance.now() * 1000,
+                    data: encodedData
+                });
+
+                if (eye === 0) decoderMono.decode(chunk);
+                else if (eye === 1) decoderLeft.decode(chunk);
+                else if (eye === 2) decoderRight.decode(chunk);
+            };
+
+            ws.onclose = () => {
+                document.getElementById('dot').classList.remove('online');
+                document.getElementById('labelStatus').innerText = 'OFFLINE';
+                setTimeout(connect, 2000);
+            };
+        }
+
+        // FPS 计数器
+        setInterval(() => {
+            const now = performance.now();
+            const fps = Math.round((frameCount * 1000) / (now - lastFpsUpdate));
+            document.getElementById('valFPS').innerText = fps;
+            frameCount = 0;
+            lastFpsUpdate = now;
+        }, 1000);
+
+        connect();
+    </script>
+</body>
+</html>
