@@ -136,7 +136,12 @@
         
         const uvBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,1, 1,1, 0,0, 1,0]), gl.STATIC_DRAW);
+        // 优化比例：16:9 画面在正方形视口显示时，截取中间约 56.25% 的区域以防止拉伸
+        // 计算：(1 - (9/16)) / 2 = 0.21875
+        const cropX = 0.21875;
+        const leftU = cropX;
+        const rightU = 1.0 - cropX;
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([leftU,1, rightU,1, leftU,0, rightU,0]), gl.STATIC_DRAW);
 
         async function startVR() {
             try {
