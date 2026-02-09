@@ -17,7 +17,7 @@
 - **Zero-Config Network**: Tunneling via `adb reverse` over USB for maximum stability.
 
 ## 🚀 Quick Start
-1. **Unity Setup**: Add `PicoVideoStreamer` and `HandDesktopControllerLink` to your scene.
+1. **Unity Setup**: Import scripts from the `UnityExample/` folder into your project. Add `PicoVideoStreamer`, `HandDesktopControllerLink`, and `PicoMotionLinkReceiver` to your scene.
 2. **Connect**: Link your Pico 4 Ultra via USB (Enable USB Debugging).
 3. **Run Server**:
    ```bash

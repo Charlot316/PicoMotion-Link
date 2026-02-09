@@ -12,7 +12,9 @@ public class PicoMotionLinkReceiver : MonoBehaviour
     public int port = 9000;
     
     private Hand leftHand;
+    private HandCanvasPointer leftUIPointer;
     private Hand rightHand;
+    private HandCanvasPointer rightUIPointer;
     
     private UdpClient udpClient;
     private Thread receiveThread;
@@ -58,8 +60,13 @@ public class PicoMotionLinkReceiver : MonoBehaviour
     void InitializeHands() {
         var hands = Object.FindObjectsOfType<Hand>();
         foreach (var hand in hands) {
-            if (hand.left) leftHand = hand;
-            else rightHand = hand;
+            if (hand.left) {
+                leftHand = hand;
+                leftUIPointer = hand.GetComponentInChildren<HandCanvasPointer>();
+            } else {
+                rightHand = hand;
+                rightUIPointer = hand.GetComponentInChildren<HandCanvasPointer>();
+            }
         }
     }
 
@@ -106,12 +113,12 @@ public class PicoMotionLinkReceiver : MonoBehaviour
     void Update() {
         // 仅处理按钮事件，位置同步移至 HandDesktopControllerLink
         lock (dataLock) {
-            ProcessButtons(leftHand, leftDataCache, ref lastLeftTrigger, ref lastLeftGrip);
-            ProcessButtons(rightHand, rightDataCache, ref lastRightTrigger, ref lastRightGrip);
+            ProcessButtons(leftHand, leftUIPointer, leftDataCache, ref lastLeftTrigger, ref lastLeftGrip);
+            ProcessButtons(rightHand, rightUIPointer, rightDataCache, ref lastRightTrigger, ref lastRightGrip);
         }
     }
 
-    void ProcessButtons(Hand hand, PicoData data, ref bool lastTrigger, ref bool lastGrip) {
+    void ProcessButtons(Hand hand, HandCanvasPointer uiPointer, PicoData data, ref bool lastTrigger, ref bool lastGrip) {
         if (hand == null || data == null || data.buttons == null || data.buttons.Count < 2) return;
 
         // 标准 WebXR 映射：Index 0 为 Index Trigger, Index 1 为 Side Grip
@@ -121,8 +128,14 @@ public class PicoMotionLinkReceiver : MonoBehaviour
         if (currentGrabBtn && !lastGrip) hand.Grab();
         else if (!currentGrabBtn && lastGrip) hand.Release();
 
-        if (currentSqueezeBtn && !lastTrigger) hand.Squeeze();
-        else if (!currentSqueezeBtn && lastTrigger) hand.Unsqueeze();
+        if (currentSqueezeBtn && !lastTrigger) {
+            hand.Squeeze();
+            if (uiPointer != null) uiPointer.Press();
+        }
+        else if (!currentSqueezeBtn && lastTrigger) {
+            hand.Unsqueeze();
+            if (uiPointer != null) uiPointer.Release();
+        }
 
         lastTrigger = currentSqueezeBtn;
         lastGrip = currentGrabBtn;
