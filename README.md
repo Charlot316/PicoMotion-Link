@@ -7,17 +7,15 @@
 ---
 
 ## 🌟 Features
-- **Independent Eye Rendering**: Dual-viewport stream (Eye 1 / Eye 2) with NO horizontal compression. Now optimized to **1:1 Square Aspect Ratio** to match VR view and save 43% bandwidth.
+- **Independent Eye Rendering**: Dual-viewport stream (Eye 1 / Eye 2) with NO horizontal compression. Optimized to **1:1 Square Aspect Ratio** to match VR view and save 43% bandwidth.
 - **Ultra-Low Latency**: Optimized UDP transport for video and async WebXR pose sync.
 - **Full 6DOF & Input Mapping**: 
   - **Head & Hands**: Real-time position and orientation.
   - **Buttons**: A/B/X/Y, Triggers, Grips, Joysticks.
-- **AutoHand Integration**: Native support for **AutoHand** physics interaction system.
-- **Head-Gaze Directional Movement**: Left-joystick movement is automatically aligned to where you are looking.
 - **Zero-Config Network**: Tunneling via `adb reverse` over USB for maximum stability.
 
 ## 🚀 Quick Start
-1. **Unity Setup**: Import scripts from the `UnityExample/` folder into your project. Add `PicoVideoStreamer`, `HandDesktopControllerLink`, and `PicoMotionLinkReceiver` to your scene.
+1. **Unity Setup**: Implement the synchronization logic in your Unity project. Refer to the [Unity Integration Guide](#unity-integration).
 2. **Connect**: Link your Pico 4 Ultra via USB (Enable USB Debugging).
 3. **Run Server**:
    ```bash
@@ -28,20 +26,50 @@
 
 ---
 
+<a name="unity-integration"></a>
+## 🛠 Unity Integration Guide
+To sync your Unity VR camera and controllers, implement a receiver that parses the JSON data from the VSSP server.
+
+### 1. Data Structure
+```csharp
+[Serializable]
+public class PicoData {
+    public string type; // "head" or "controller"
+    public string handedness; // "left" or "right"
+    public Vector3 position;
+    public Quaternion orientation;
+    public List<PicoButton> buttons;
+    public List<float> axes; // [x, y]
+}
+```
+
+### 2. Basic Sync Logic
+Listen to the UDP port (default `9000`) and apply the received data to your XR rig:
+```csharp
+// Example: Applying HMD Orientation
+headCamera.transform.localRotation = new Quaternion(
+    -data.orientation.x, 
+    -data.orientation.y, 
+     data.orientation.z, 
+     data.orientation.w
+);
+```
+
+---
+
 <a name="中文说明"></a>
 ## 🌟 功能特性
 - **原生双目独立渲染**: 非传统的 SBS 合图模式。左右眼独立采样发送，现已优化为 **1:1 正方形比例** 以适配 VR 视口并节省约 43% 带宽。
 - **极致低延迟**: 视频流基于 UDP，追踪数据基于异步 WebSocket。
 - **全方位交互**: 
   - **追踪**: 头部视角、双持手柄位置及姿态。
-  - **摇杆/按键**: 映射 Unity 物理轴向，支持视角导向移动逻辑。
-- **AutoHand 联动**: 提供对 **AutoHand** 物理交互系统的原生脚本支持（见示例脚本）。
+  - **摇杆/按键**: 映射 Unity 物理轴向。
 - **一键部署**: 自动配置 ADB 端口转发，无视 Wi-Fi 环境波动。
 
 ## 🛠 开发环境
 - **硬件**: Pico 4 Ultra / Pico 4。
 - **Python**: 3.10+ (Dependencies: `websockets`, `cryptography` for HTTPS).
-- **Unity**: 2021.3+ (Integrated via VSSP Provider scripts).
+- **Unity**: 2021.3+
 
 ## 📄 License
 Apache-2.0
