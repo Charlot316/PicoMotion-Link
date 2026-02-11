@@ -31,13 +31,13 @@ adb reverse tcp:8000 tcp:8000
 
 # 2. 启动服务
 echo ">>> 启动数据中心与视频流中转..."
-"$PROJECT_DIR/venv/bin/python" "$PROJECT_DIR/fast_receiver.py" &
+python3 "$PROJECT_DIR/fast_receiver.py" &
 RECEIVER_PID=$!
 
-"$PROJECT_DIR/venv/bin/python" "$PROJECT_DIR/video_streamer.py" &
+python3 "$PROJECT_DIR/video_streamer.py" &
 VIDEO_PID=$!
 
-"$PROJECT_DIR/venv/bin/python" -m http.server 8000 > /dev/null 2>&1 &
+python3 -m http.server 8000 > /dev/null 2>&1 &
 HTTP_PID=$!
 
 sleep 1

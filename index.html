@@ -155,10 +155,12 @@
                     const viewerPose = frame.getViewerPose(refSpace);
                     if (viewerPose) {
                         // 1. Post pose data
+                        const headPos = viewerPose.transform.position;
+                        const headOri = viewerPose.transform.orientation;
                         fetch(poseUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ 
                             type: 'head', 
-                            position: viewerPose.transform.position, 
-                            orientation: viewerPose.transform.orientation 
+                            position: { x: headPos.x, y: headPos.y, z: headPos.z }, 
+                            orientation: { x: headOri.x, y: headOri.y, z: headOri.z, w: headOri.w } 
                         }) }).catch(() => {});
 
                         // 2. Render Video Stream 
@@ -188,18 +190,21 @@
                                 gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
                             }
                         }
-
+                        
                         // 3. Sync Controller Hands
                         for (const inputSource of session.inputSources) {
                             if (inputSource.gripSpace) {
                                 const gripPose = frame.getPose(inputSource.gripSpace, refSpace);
                                 if (gripPose) {
+                                    const gp = gripPose.transform.position;
+                                    const go = gripPose.transform.orientation;
                                     const gamepad = inputSource.gamepad;
+                                    
                                     fetch(poseUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ 
                                         type: 'controller', 
                                         handedness: inputSource.handedness, 
-                                        position: gripPose.transform.position, 
-                                        orientation: gripPose.transform.orientation,
+                                        position: { x: gp.x, y: gp.y, z: gp.z }, 
+                                        orientation: { x: go.x, y: go.y, z: go.z, w: go.w },
                                         buttons: gamepad ? gamepad.buttons.map(b => ({ pressed: b.pressed, value: b.value })) : [],
                                         axes: gamepad ? [gamepad.axes[2], gamepad.axes[3]] : []
                                     }) }).catch(() => {});
