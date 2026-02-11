@@ -16,12 +16,18 @@ def get_pico_event_paths():
             if dev_match:
                 current_device = dev_match.group(1)
 
-            # 匹配名称 (Pico 4 Ultra 通常包含 Pico Controller)
-            if current_device and "name:" in line and "Pico" in line:
-                name = line.split('"')[1]
-                # 简单区分左右 (根据实际情况可能需要调整匹配字符)
-                side = "Left" if "Left" in name or "L" in name else "Right"
-                devices[side] = current_device
+            # 匹配名称 (Pico 4 Ultra 通常包含 Pico Controller, 也可能叫 pvr-virtual-input)
+            if current_device and "name:" in line:
+                name_val = line.split('"')[1].lower()
+                if "pico" in name_val or "pvr" in name_val or "virtual" in name_val:
+                    name = line.split('"')[1]
+                    # 简单区分左右 (0通常是左，或者名字里带 left)
+                    side = (
+                        "Left"
+                        if "left" in name_val or " l" in name_val or "0" in name_val
+                        else "Right"
+                    )
+                    devices[side] = current_device
 
         return devices
     except Exception as e:
