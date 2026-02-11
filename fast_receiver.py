@@ -148,11 +148,23 @@ def receive():
         ]
         states[key]["euler"] = quat_to_euler(unity_ori)
 
-        # 4. 构造发送给 Unity 的最终数据包 (确保是扁平的、直接的四元数)
+        if states[key]["initial_pos"] is None:
+            states[key]["initial_pos"] = unity_pos
+
+        # 计算相对位移
+        ipos = states[key]["initial_pos"]
+        rel_pos = {
+            "x": unity_pos["x"] - ipos["x"],
+            "y": unity_pos["y"] - ipos["y"],
+            "z": unity_pos["z"] - ipos["z"],
+        }
+
+        # 4. 构造发送给 Unity 的最终数据包
         clean_data = {
             "type": dtype,
             "handedness": data.get("handedness", ""),
-            "position": unity_pos,
+            "position": rel_pos,  # 发送相对坐标给 Unity，方便重置
+            "absolutePosition": unity_pos,  # 保留绝对位置备用
             "orientation": unity_ori,
         }
 
@@ -165,18 +177,12 @@ def receive():
                 states[key]["btns"][i] = b["pressed"]
             states[key]["axes"] = clean_data["axes"]
 
-            # 处理重置逻辑 (一般是按下菜单键/摇杆)
-            # 检查按钮 3 (通常是 Joystick Click) 是否被按下
             if any(
                 b.get("pressed") for i, b in enumerate(clean_data["buttons"]) if i == 3
             ):
                 for k in states:
                     if states[k]["pos"]:
                         states[k]["initial_pos"] = states[k]["pos"]
-
-        # 处理初始位置记录
-        if states[key]["initial_pos"] is None:
-            states[key]["initial_pos"] = states[key]["pos"]
 
         # 5. 发送处理后的 JSON 给 Unity
         message = json.dumps(clean_data).encode()
