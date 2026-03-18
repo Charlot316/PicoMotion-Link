@@ -5,8 +5,8 @@
     <meta charset="UTF-8">
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: 'Inter', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
-        #overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; backdrop-filter: blur(10px); }
-        button { padding: 30px 60px; font-size: 24px; cursor: pointer; background: linear-gradient(135deg, #00f2ff, #0072ff); color: white; border: none; border-radius: 50px; box-shadow: 0 10px 30px rgba(0,242,255,0.3); transition: transform 0.2s; }
+        #overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; backdrop-filter: blur(10px); cursor: pointer; user-select: none; }
+        button { padding: 30px 60px; font-size: 24px; cursor: pointer; background: linear-gradient(135deg, #00f2ff, #0072ff); color: white; border: none; border-radius: 50px; box-shadow: 0 10px 30px rgba(0,242,255,0.3); transition: transform 0.2s; pointer-events: none; }
         button:active { transform: scale(0.95); }
         #status-panel { position: fixed; bottom: 20px; background: rgba(255,255,255,0.1); padding: 10px 20px; border-radius: 10px; font-family: monospace; font-size: 12px; display: flex; gap: 20px; color: #00f2ff; }
         .stat { display: flex; flex-direction: column; }
@@ -18,8 +18,9 @@
 <body>
     <div id="overlay">
         <h1 style="font-weight: 200; letter-spacing: 5px;">PICO VSSP LINK</h1>
-        <p style="color: rgba(255,255,255,0.5); margin-bottom: 30px;">点击下方按钮进入 VR 超低延迟同步模式</p>
-        <button id="startBtn">开始同步 (VR Mode)</button>
+        <p style="color: rgba(255,255,255,0.5); margin-bottom: 30px;">点击屏幕任意位置进入 VR 超低延迟同步模式</p>
+        <button id="startBtn">点击任意位置开始</button>
+        <p style="color: rgba(255,255,255,0.3); font-size: 13px; margin-top: 20px; letter-spacing: 2px;">TAP ANYWHERE TO START</p>
     </div>
 
     <img id="preview" src="" alt="等待视频数据流..." />
@@ -193,6 +194,7 @@
                         
                         // 3. Sync Controller Hands
                         for (const inputSource of session.inputSources) {
+                            if (inputSource.handedness === 'none') continue; // 跳过 handedness 未确定的设备
                             if (inputSource.gripSpace) {
                                 const gripPose = frame.getPose(inputSource.gripSpace, refSpace);
                                 if (gripPose) {
@@ -219,7 +221,11 @@
             }
         }
 
-        document.getElementById('startBtn').onclick = startVR;
+        // 点击整个 overlay 区域即可触发（真实用户激活），同时请求全屏
+        document.getElementById('overlay').addEventListener('click', () => {
+            try { document.documentElement.requestFullscreen().catch(() => {}); } catch(e) {}
+            startVR().catch((e) => console.warn('[VR] startVR failed:', e.message));
+        });
 
         // === Wake Lock: 防止头盔屏幕休眠 ===
         let wakeLock = null;
@@ -244,15 +250,7 @@
         });
         requestWakeLock();
 
-        // === 自动启动 VR（Pico 内置浏览器通常无需手势限制）===
-        window.addEventListener('load', () => {
-            setTimeout(() => {
-                startVR().catch(() => {
-                    // 自动启动失败（浏览器要求手势），保留按钮让用户手动点击
-                    console.log('[AutoStart] 需要手动点击按钮');
-                });
-            }, 500);
-        });
+        // 自动启动需要用户激活，改为点击任意位置触发（见 overlay click handler）
 
         // FPS Pulse
         setInterval(() => {

@@ -14,6 +14,9 @@ log.setLevel(logging.ERROR)
 UNITY_PORT = 9000
 unity_sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+# 前 N 包 WebXR tracking 不稳定，延迟采样初始原点
+STAB_PACKETS = 20
+
 # 存储设备状态
 states = {
     "head": {
@@ -21,6 +24,7 @@ states = {
         "initial_pos": None,
         "euler": [0, 0, 0],
         "quat": [0, 0, 0, 1],
+        "pkt": 0,
     },
     "left": {
         "pos": None,
@@ -29,6 +33,7 @@ states = {
         "quat": [0, 0, 0, 1],
         "btns": {},
         "axes": [0, 0],
+        "pkt": 0,
     },
     "right": {
         "pos": None,
@@ -37,6 +42,7 @@ states = {
         "quat": [0, 0, 0, 1],
         "btns": {},
         "axes": [0, 0],
+        "pkt": 0,
     },
 }
 
@@ -71,7 +77,10 @@ def ui_thread():
         )
         for key in ["head", "left", "right"]:
             s = states[key]
-            if s["pos"] and s["initial_pos"]:
+            if s["pos"] and s["initial_pos"] is None:
+                remaining = max(0, STAB_PACKETS - s["pkt"])
+                sys.stdout.write(f"{key.upper():5} | 初始化中... 等待稳定 ({remaining} 包)\n")
+            elif s["pos"] and s["initial_pos"]:
                 dx, dy, dz = (
                     s["pos"]["x"] - s["initial_pos"]["x"],
                     s["pos"]["y"] - s["initial_pos"]["y"],
@@ -92,7 +101,7 @@ def ui_thread():
                     b2 = ("Y" if key == "left" else "B") if btns.get(5) else "_"
                     line = f"{key.upper():5} | Pos: {dx:>6.2f}, {dy:>6.2f}, {dz:>6.2f} | {ang_str} | {quat_str} | JS:({s['axes'][0]:>5.2f}, {s['axes'][1]:>5.2f})"
                 sys.stdout.write(line + "\n")
-            else:
+            elif not s["pos"]:
                 sys.stdout.write(f"{key.upper():5} | 等待数据中...\n")
         sys.stdout.write(
             "============================================================================================================\n"
@@ -147,8 +156,10 @@ def receive():
             unity_ori["w"],
         ]
         states[key]["euler"] = quat_to_euler(unity_ori)
+        states[key]["pkt"] += 1
 
-        if states[key]["initial_pos"] is None:
+        # 等待 STAB_PACKETS 包后再设定初始原点，避免 tracking 抖动期采样
+        if states[key]["initial_pos"] is None and states[key]["pkt"] >= STAB_PACKETS:
             states[key]["initial_pos"] = unity_pos
 
         # 计算相对位移
@@ -183,6 +194,7 @@ def receive():
                 for k in states:
                     if states[k]["pos"]:
                         states[k]["initial_pos"] = states[k]["pos"]
+                        states[k]["pkt"] = STAB_PACKETS  # 手动重置视为已稳定，立即生效
 
         # 5. 发送处理后的 JSON 给 Unity
         message = json.dumps(clean_data).encode()
