@@ -216,14 +216,19 @@
                     }
                 }
                 session.requestAnimationFrame(onFrame);
+
+                // VR 结束时恢复 overlay，允许重新点击进入
+                session.addEventListener('end', () => {
+                    isPresenting = false;
+                    document.getElementById('overlay').style.display = 'flex';
+                });
             } catch (e) {
                 alert("VR Start Failed: " + e.message);
             }
         }
 
-        // 点击整个 overlay 区域即可触发（真实用户激活），同时请求全屏
+        // 点击 overlay 任意位置启动 VR（真实用户激活）
         document.getElementById('overlay').addEventListener('click', () => {
-            try { document.documentElement.requestFullscreen().catch(() => {}); } catch(e) {}
             startVR().catch((e) => console.warn('[VR] startVR failed:', e.message));
         });
 
