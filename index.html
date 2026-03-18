@@ -221,13 +221,44 @@
 
         document.getElementById('startBtn').onclick = startVR;
 
-        document.getElementById('startBtn').onclick = startVR;
+        // === Wake Lock: 防止头盔屏幕休眠 ===
+        let wakeLock = null;
+        async function requestWakeLock() {
+            if (!('wakeLock' in navigator)) return;
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+                console.log('[WakeLock] 已获取，屏幕将保持唤醒');
+                wakeLock.addEventListener('release', () => {
+                    console.log('[WakeLock] 已释放，尝试重新获取...');
+                    // 页面重新可见时自动重新获取
+                });
+            } catch (e) {
+                console.warn('[WakeLock] 获取失败:', e.message);
+            }
+        }
+        // 页面恢复可见时重新获取（从后台切回来）
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                requestWakeLock();
+            }
+        });
+        requestWakeLock();
+
+        // === 自动启动 VR（Pico 内置浏览器通常无需手势限制）===
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                startVR().catch(() => {
+                    // 自动启动失败（浏览器要求手势），保留按钮让用户手动点击
+                    console.log('[AutoStart] 需要手动点击按钮');
+                });
+            }, 500);
+        });
 
         // FPS Pulse
         setInterval(() => {
             document.getElementById('valFps').innerText = frameCount;
             frameCount = 0;
         }, 1000);
-    </script>
+</script>
 </body>
 </html>
